@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mezuniyet Oranı Görselleştirme</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 20px;
+      background-color: #f9f9f9;
+    }
+    .chart-container {
+      width: 80%;
+      margin: 0 auto;
+      text-align: center;
+      overflow-x: auto;
+    }
+    table {
+      width: 80%;
+      margin: 20px auto;
+      border-collapse: collapse;
+      text-align: center;
+      font-size: 14px;
+      background-color: #fff;
+    }
+    th, td {
+      border: 1px solid #ddd;
+      padding: 10px;
+      text-align: center;
+      vertical-align: middle;
+    }
+    th {
+      background-color: #f4f4f4;
+      font-weight: bold;
+    }
+    tr:nth-child(even) {
+      background-color: #f9f9f9;
+    }
+    tr:hover {
+      background-color: #f1f1f1;
+    }
+    td.faculty {
+      text-align: center;
+      font-weight: bold;
+      background-color: #f0f8ff;
+    }
+    .totals {
+      text-align: center;
+      margin-bottom: 20px;
+    }
+    .totals span {
+      font-size: 16px;
+      font-weight: bold;
+      color: #007bff;
+    }
+  </style>
+</head>
+<body>
+  <h1 style="text-align: center;">Ulaşılan Mezun Oranı Görselleştirme</h1>
+  <div class="totals">
+    <p>Genel Toplam Ulaşılan Mezun Oranı: <span id="generalTotal">0%</span></p>
+    <p>Seçilen Fakülte/Bölüm Toplam Ulaşılan Mezun Oranı: <span id="facultyTotal">0%</span></p>
+  </div>
+  <div style="text-align:center; margin-bottom: 20px;">
+    <label for="facultySelect">Fakülte Seçin: </label>
+    <select id="facultySelect">
+      <option value="all">Tüm Fakülteler</option>
+    </select>
+  </div>
+  <div class="chart-container">
+    <canvas id="barChart"></canvas>
+  </div>
+  <table id="dataTable">
+    <thead>
+      <tr>
+        <th>Fakülte</th>
+        <th>Bölüm Adı</th>
+        <th>Ulaşılan Mezun</th>
+        <th>Toplam Mezun</th>
+        <th>Toplam Öğrenci</th>
+        <th>Ulaşılan Mezun Oranı (%)</th>
+      </tr>
+    </thead>
+    <tbody>
+    </tbody>
+  </table>
+  <script>
+    const facultySelect = document.getElementById("facultySelect");
+    const generalTotalSpan = document.getElementById("generalTotal");
+    const facultyTotalSpan = document.getElementById("facultyTotal");
+    const dataTable = document.getElementById("dataTable").getElementsByTagName("tbody")[0];
+
+    // Verileri JSON dosyasından al
+    fetch('mezun.json') 
+      .then(response => response.json())
+      .then(rawData => {
+        // Fakülteleri Grupla
+        function getGroupedData(data) {
+          const faculties = [...new Set(data.map(item => item.faculty))];
+          return faculties.map(faculty => {
+            const filteredData = data.filter(item => item.faculty === faculty);
+            const graduatedStudents = filteredData.reduce((sum, item) => sum + item.graduatedStudents, 0);
+            const totalGraduates = filteredData.reduce((sum, item) => sum + item.totalGraduates, 0);
+            const totalStudents = filteredData.reduce((sum, item) => sum + item.totalStudents, 0);
+            return {
+              department: faculty, // Fakülte ismi gösterilecek
+              faculty,
+              graduatedStudents,
+              totalGraduates,
+              totalStudents,
+              ratio: totalGraduates === 0 ? 0 : ((graduatedStudents / totalGraduates) * 100).toFixed(2)
+            };
+          });
+        }
+
+        // Fakülte seçeneklerini günceller
+        function updateFacultyOptions(data) {
+          const faculties = [...new Set(data.map(item => item.faculty))];
+          faculties.forEach(faculty => {
+            const option = document.createElement("option");
+            option.value = faculty;
+            option.textContent = faculty;
+            facultySelect.appendChild(option);
+          });
+        }
+
+        // Tablo her zaman tüm verilerle sabit kalır
+        function updateTable(data, isGrouped = false) {
+          dataTable.innerHTML = "";
+          const facultyCounts = {}; // Fakülte başına kaç satır var?
+          rawData.forEach(item => {
+            if (!facultyCounts[item.faculty]) {
+              facultyCounts[item.faculty] = 0;
+            }
+            facultyCounts[item.faculty]++;
+          });
+
+          let currentFaculty = ""; // Şimdiki fakülteyi takip etmek için
+          rawData.forEach(item => {
+            const row = dataTable.insertRow();
+            let cellIndex = 0;
+
+            // Fakülte adına göre rowSpan
+            if (currentFaculty !== item.faculty) {
+              currentFaculty = item.faculty;
+              const facultyCell = row.insertCell(cellIndex++);
+              facultyCell.textContent = item.faculty;
+              facultyCell.rowSpan = facultyCounts[item.faculty];
+              facultyCell.className = "faculty";
+            } else {
+              //cellIndex++; // Geçerli fakülte için rowSpan oluşturulduğu için atla
+            }
+
+            // Bölüm ve diğer bilgiler
+            row.insertCell(cellIndex++).textContent = item.department;
+            row.insertCell(cellIndex++).textContent = item.graduatedStudents;
+            row.insertCell(cellIndex++).textContent = item.totalGraduates;
+            row.insertCell(cellIndex++).textContent = item.totalStudents;
+            row.insertCell(cellIndex++).textContent = item.totalGraduates === 0
+              ? "0"
+              : ((item.graduatedStudents / item.totalGraduates) * 100).toFixed(2);
+          });
+        }
+
+        // Grafik oluşturma
+        function createChart(data, isGrouped = false) {
+          const ctx = document.getElementById("barChart").getContext("2d");
+          return new Chart(ctx, {
+            type: "bar",
+            data: {
+              labels: data.map(item => isGrouped ? item.department : item.department),
+              datasets: [{
+                label: "Ulaşılan Mezun Oranı (%)",
+                data: data.map(item => item.totalGraduates === 0 ? 0 : ((item.graduatedStudents / item.totalGraduates) * 100).toFixed(2)),
+                backgroundColor: "rgba(75, 192, 192, 0.7)",
+                borderColor: "rgba(75, 192, 192, 1)",
+                borderWidth: 1
+              }]
+            },
+            options: {
+              responsive: true,
+              scales: {
+                y: {
+                  beginAtZero: true,
+                  title: {
+                    display: true,
+                    text: "Ulaşılan Mezun Oranı (%)"
+                  }
+                },
+                x: {
+                  ticks: {
+                    autoSkip: false
+                  },
+                  title: {
+                    display: true,
+                    text: isGrouped ? "Fakülteler" : "Bölümler"
+                  }
+                },
+              },
+              plugins: {
+                tooltip: {
+                  callbacks: {
+                    title: (context) => {
+                      // Gruplanmışsa fakülte adını, değilse bölüm adını göster
+                      return isGrouped ?
+                        data[context[0].dataIndex].faculty :
+                        data[context[0].dataIndex].department;
+                    },
+                    label: (context) => {
+                      const item = data[context.dataIndex];
+                      return [
+                        "Ulaşılan Mezun Oranı (%): " + (isGrouped ? item.ratio : item.totalGraduates === 0 ? 0 : ((item.graduatedStudents / item.totalGraduates) * 100).toFixed(2)),
+                        "Ulaşılan Mezun: " + item.graduatedStudents,
+                        "Toplam Mezun: " + item.totalGraduates,
+                        "Mevcut Öğrenci: " + item.totalStudents
+                      ];
+                    }
+                  }
+                },
+                legend: {
+                  display: false // "Ulaşılan Mezun Oranı (%)" yazısını gizlemek için
+                }
+              }
+            }
+          });
+        }
+
+        // Ana fonksiyon
+        function main() {
+          const groupedData = getGroupedData(rawData);
+          updateFacultyOptions(rawData);
+          generalTotalSpan.textContent = calculateTotal(rawData) + "%";
+
+          let currentData = groupedData;
+          facultyTotalSpan.textContent = calculateTotal(currentData) + "%";
+          updateTable(rawData); // Tüm veriler sabit olarak güncellenir
+          let chart = createChart(currentData, true);
+
+          facultySelect.addEventListener("change", (e) => {
+            const faculty = e.target.value;
+            currentData = faculty === "all" ? groupedData : rawData.filter(item => item.faculty === faculty);
+
+            facultyTotalSpan.textContent = calculateTotal(currentData) + "%";
+            chart.destroy();
+            chart = createChart(currentData, faculty === "all");
+          });
+        }
+
+        function calculateTotal(data) {
+          const totalGraduatedStudents = data.reduce((sum, item) => sum + (item.graduatedStudents || 0), 0);
+          const totalGraduates = data.reduce((sum, item) => sum + (item.totalGraduates || 0), 0);
+          return totalGraduates === 0 ? 0 : ((totalGraduatedStudents / totalGraduates) * 100).toFixed(2);
+        }
+
+        main();
+      })
+      .catch(error => {
+        console.error("Veriler yüklenirken bir hata oluştu:", error);
+        // Hata durumunda kullanıcıya bilgi verilebilir
+        alert("Veriler yüklenirken bir hata oluştu. Lütfen daha sonra tekrar deneyin.");
+      });
+
+  </script>
+</body>
+</html>
